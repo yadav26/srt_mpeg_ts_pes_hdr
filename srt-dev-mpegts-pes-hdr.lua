@@ -63,6 +63,8 @@ fields.pes_cp_right = ProtoField.uint8("srt_dev.pes_cp_right", "CopyRight", base
 fields.pes_original = ProtoField.uint8("srt_dev.pes_original", "PES Original", base.HEX)
 fields.pes_pts_indicator = ProtoField.uint8("srt_dev.pes_pts_indicator", "Pts Flag", base.HEX)
 fields.pes_hdr_len2 = ProtoField.uint8("srt_dev.pes_hdr_len2", "PES Header Length2", base.HEX)
+fields.pes_pts = ProtoField.uint8("srt_dev.pes_pts", "PTS", base.HEX)
+fields.pes_dts = ProtoField.uint8("srt_dev.pes_dts", "DTS", base.HEX)
 
 fields.none = ProtoField.none("srt_dev.none", "none", base.NONE)
 
@@ -999,8 +1001,7 @@ function srt_dev.dissector (tvb, pinfo, tree)
 					bit.lshift(tvb(offset+1, 1):uint(),17),
 					  bit.lshift(tvb(offset+2, 1):uint(),9),
 					  bit.lshift(tvb(offset+3, 1):uint(),1),
-					  bit.band(tvb(offset+4, 1):uint(), 0x80
-					))
+					  bit.band(tvb(offset+4, 1):uint(), 0x80))
 					local lpcr_extn = bit.bor( bit.lshift(bit.band(tvb(offset+4, 1):uint(), 0x1), 8),
 						tvb(offset+5, 1):uint())
 
@@ -1027,7 +1028,34 @@ function srt_dev.dissector (tvb, pinfo, tree)
 					pes_align_indicator = pes_header_tree:add(fields.pes_align_indicator, (bit.band(tvb(offset+6, 1):uint(), 0x4) ))
 					pes_cp_right = pes_header_tree:add(fields.pes_cp_right, (bit.band(tvb(offset+6, 1):uint(), 0x2) ))
 					pes_original = pes_header_tree:add(fields.pes_original, (bit.band(tvb(offset+6, 1):uint(), 0x1) ))
+
+					--pes_header->pts_ind = ((data[7] & 0xC0) >> 6);
+					local lpts_indi = bit.rshift(bit.band(tvb(offset+7, 1):uint(), 0xC0), 6 )
+					pes_pts_indicator = pes_header_tree:add(fields.pes_pts_indicator, lpts_indi )
+					pes_hdr_len2 = pes_header_tree:add(fields.pes_hdr_len2, tvb(offset+8, 1) )
 					
+					-- v = (((src[9] & 0x0F) >> 1) << 30);
+					-- v += (((src[10] << 7) | (src[11] >> 1)) << 15);
+					-- v += ((src[11] << 7) | (src[4] >> 1));
+					
+					if lpts_indi == 0x2 then
+						local lpts1 = bit.lshift( bit.rshift( bit.band(tvb(offset+9, 1):uint(), 0x0f) ,1), 30) 
+						local lpts2 = bit.lshift( bit.bor( bit.lshift(tvb(offset+10, 1):uint(),7), bit.rshift( tvb(offset+11,1):uint(), 1) ), 15)
+						local lpts3 = bit.bor( bit.lshift( tvb(offset+12,1):uint(),7), bit.rshift(tvb(offset+13, 1):uint(),1))
+						pes_pts = pes_header_tree:add(fields.pes_pts, lpts1+lpts2+lpts3 )
+					end
+					if lpts_indi == 0x3 then
+						local lpts1 = bit.lshift( bit.rshift( bit.band(tvb(offset+9, 1):uint(), 0x0f) ,1), 30) 
+						local lpts2 = bit.lshift( bit.bor( bit.lshift(tvb(offset+10, 1):uint(),7), bit.rshift( tvb(offset+11,1):uint(), 1) ), 15)
+						local lpts3 = bit.bor( bit.lshift( tvb(offset+12,1):uint(),7), bit.rshift(tvb(offset+13, 1):uint(),1))
+						pes_pts = pes_header_tree:add(fields.pes_pts, lpts1+lpts2+lpts3 )
+					
+						local ldts1 = bit.lshift( bit.rshift( bit.band(tvb(offset+14, 1):uint(), 0x0f) ,1), 30) 
+						local ldts2 = bit.lshift( bit.bor( bit.lshift(tvb(offset+15, 1):uint(),7), bit.rshift( tvb(offset+16,1):uint(), 1) ), 15)
+						local ldts3 = bit.bor( bit.lshift( tvb(offset+17,1):uint(),7), bit.rshift(tvb(offset+18, 1):uint(),1))
+						pes_dts = pes_header_tree:add(fields.pes_dts, ldts1+ldts2+ldts3 )
+						
+					end
 				end
 			end
 

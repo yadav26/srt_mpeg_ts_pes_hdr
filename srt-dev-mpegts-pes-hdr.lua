@@ -26,6 +26,7 @@ fields.dst_sock = ProtoField.uint32("srt_dev.dst_sock", "Destination Socket ID",
 fields.mpegts_packets = ProtoField.uint32(NAME .. ".mpegts_packets", "MPEG-TS Queue", base.HEX)
 fields.packet = ProtoField.uint32(NAME .. ".packet", "mpeg-ts pkt1", base.HEX)
 fields.mpegts_hdr = ProtoField.uint32(NAME .. ".mpegts_hdr", "TS Header", base.HEX)
+fields.pes_header_tree = ProtoField.uint32(NAME .. ".pes_header_tree", "PES Header", base.HEX)
 fields.mpegts_adaptation_tree = ProtoField.uint32(NAME .. ".mpegts_adaptation_tree", "Adaptation Header", base.HEX)
 
 fields.ts_hdr_sync_byte = ProtoField.uint8("srt_dev.ts_hdr_sync_byte", "Sync Byte", base.HEX)
@@ -46,13 +47,22 @@ fields.ts_adap_opcr_flag = ProtoField.uint8("srt_dev.ts_adap_opcr_flag", "OPcr f
 fields.ts_adap_splice_countdown = ProtoField.uint8("srt_dev.ts_adap_splice_countdown", "Splice countdown", base.HEX)
 fields.ts_adap_transport_private_data = ProtoField.uint8("srt_dev.ts_adap_transport_private_data", "Transport Private Data", base.HEX)
 fields.ts_adap_extn = ProtoField.uint8("srt_dev.ts_adap_extn", "Adaptation Extension", base.HEX)
-fields.ts_adap_pcr = ProtoField.uint64("srt_dev.ts_adap_pcr", "Pcr flag", base.HEX)
-fields.ts_adap_opcr = ProtoField.uint64("srt_dev.ts_adap_opcr", "Pcr flag", base.HEX)
+fields.ts_adap_pcr = ProtoField.uint8("srt_dev.ts_adap_pcr", "Program Clock Reference", base.HEX)
+fields.ts_adap_opcr = ProtoField.uint8("srt_dev.ts_adap_opcr", "Other PCR", base.HEX)
 
 fields.ts_adap_legal_time_window = ProtoField.uint16("srt_dev.ts_adap_legal_time_window", "Legal Time Window", base.HEX)
 fields.ts_adap_piecewise_rate = ProtoField.uint32("srt_dev.ts_adap_piecewise_rate", "Piecewise Rate", base.HEX)
 fields.ts_adap_seamless_splice = ProtoField.uint64("srt_dev.ts_adap_seamless_splice", "Seamless Splice", base.HEX)
 -- PES HDR
+fields.pes_streamid = ProtoField.uint8("srt_dev.pes_streamid", "Stream ID", base.HEX)
+fields.pes_hdr_len = ProtoField.uint8("srt_dev.pes_hdr_len", "PES Header Length", base.HEX)
+fields.pes_scarmble = ProtoField.uint8("srt_dev.pes_scarmble", "Scramble", base.HEX)
+fields.pes_priority = ProtoField.uint8("srt_dev.pes_hdr_len", "Priority", base.HEX)
+fields.pes_align_indicator = ProtoField.uint8("srt_dev.pes_align_indicator", "Align Indicator", base.HEX)
+fields.pes_cp_right = ProtoField.uint8("srt_dev.pes_cp_right", "CopyRight", base.HEX)
+fields.pes_original = ProtoField.uint8("srt_dev.pes_original", "PES Original", base.HEX)
+fields.pes_pts_indicator = ProtoField.uint8("srt_dev.pes_pts_indicator", "Pts Flag", base.HEX)
+fields.pes_hdr_len2 = ProtoField.uint8("srt_dev.pes_hdr_len2", "PES Header Length2", base.HEX)
 
 fields.none = ProtoField.none("srt_dev.none", "none", base.NONE)
 
@@ -972,18 +982,57 @@ function srt_dev.dissector (tvb, pinfo, tree)
 			if adaptationPresent ~= 0 then
 				-- we have reached endof TS
 				mpegts_adaptation_tree = mpegts_hdr:add(fields.mpegts_adaptation_tree, tvb(offset, 1))	
+				local ladap_len = tvb(offset, 1):uint()
 				ts_adap_len = mpegts_adaptation_tree:add(fields.ts_adap_len, tvb(offset, 1))
 				offset = offset + 1
 				ts_adap_discontinuity_in = mpegts_adaptation_tree:add(fields.ts_adap_discontinuity_in, bit.rshift(tvb(offset, 1):uint(),7))
 				ts_adap_random_access_in = mpegts_adaptation_tree:add(fields.ts_adap_random_access_in, bit.rshift(bit.band(tvb(offset, 1):uint(), 0x40),6))
 				ts_adap_es_priority_in = mpegts_adaptation_tree:add(fields.ts_adap_es_priority_in, bit.rshift(bit.band(tvb(offset, 1):uint(), 0x20),5))
-				ts_adap_pcr_flag = mpegts_adaptation_tree:add(fields.ts_adap_pcr_flag, bit.rshift(bit.band(tvb(offset, 1):uint(), 0x10),4))
+				local lpcr_present = bit.rshift(bit.band(tvb(offset, 1):uint(), 0x10),4)
+				ts_adap_pcr_flag = mpegts_adaptation_tree:add(fields.ts_adap_pcr_flag, lpcr_present)
 				ts_adap_opcr_flag = mpegts_adaptation_tree:add(fields.ts_adap_opcr_flag, bit.rshift(bit.band(tvb(offset, 1):uint(), 0x8),3))
 				ts_adap_splice_countdown = mpegts_adaptation_tree:add(fields.ts_adap_splice_countdown, bit.rshift(bit.band(tvb(offset, 1):uint(), 0x4),2))
 				ts_adap_transport_private_data = mpegts_adaptation_tree:add(fields.ts_adap_transport_private_data, bit.rshift(bit.band(tvb(offset, 1):uint(), 0x4),1))
 				ts_adap_extn = mpegts_adaptation_tree:add(fields.ts_adap_extn, bit.band(tvb(offset, 1):uint(), 0x01))
+				if lpcr_present == 1 then
+					local lpcr_base = bit.bor(bit.lshift(tvb(offset, 1):uint(),25) ,
+					bit.lshift(tvb(offset+1, 1):uint(),17),
+					  bit.lshift(tvb(offset+2, 1):uint(),9),
+					  bit.lshift(tvb(offset+3, 1):uint(),1),
+					  bit.band(tvb(offset+4, 1):uint(), 0x80
+					))
+					local lpcr_extn = bit.bor( bit.lshift(bit.band(tvb(offset+4, 1):uint(), 0x1), 8),
+						tvb(offset+5, 1):uint())
 
+					ts_adap_pcr = mpegts_adaptation_tree:add(fields.ts_adap_pcr, ((300*lpcr_base)+lpcr_extn) )
+					-- uint64_t pcr_base = (data[0] << 25) | (data[1] << 17) | (data[2] << 9) | (data[3] << 1) | (data[4] & 0x80);
+					-- uint64_t pcr_ext = ((data[4] & 1) << 8) | (data[5]);
+					-- *pcr = 300 * pcr_base + pcr_ext;
+				end
+				
+				offset = offset + ladap_len
+
+				if bit.bxor(tvb(offset, 1):uint(),0x00) == 0 and 
+					bit.bxor(tvb(offset+1, 1):uint(),0x00) == 0 and  
+					bit.bxor(tvb(offset+2, 1):uint(),0x01) == 0 then
+					
+					pes_header_tree = mpegts_hdr:add(fields.pes_header_tree, tvb(offset, 1))	
+
+					pes_streamid = pes_header_tree:add(fields.pes_streamid, tvb(offset+3, 1) )
+					pes_hdr_len = pes_header_tree:add(fields.pes_hdr_len, 
+					 							bit.bor( bit.lshift( tvb(offset+4, 1):uint(), 8), tvb(offset+5, 1):uint() ))
+					--(data[6] & 0x30) >> 4;
+					pes_scarmble = pes_header_tree:add(fields.pes_scarmble, bit.rshift(bit.band(tvb(offset+6, 1):uint(), 0x30), 4 ))
+					pes_priority = pes_header_tree:add(fields.pes_priority, (bit.band(tvb(offset+6, 1):uint(), 0x8) ))
+					pes_align_indicator = pes_header_tree:add(fields.pes_align_indicator, (bit.band(tvb(offset+6, 1):uint(), 0x4) ))
+					pes_cp_right = pes_header_tree:add(fields.pes_cp_right, (bit.band(tvb(offset+6, 1):uint(), 0x2) ))
+					pes_original = pes_header_tree:add(fields.pes_original, (bit.band(tvb(offset+6, 1):uint(), 0x1) ))
+					
+				end
 			end
+
+			--READ PES
+
 			offset = offset + 183
 		end
 		
